@@ -1,0 +1,712 @@
+{
+  "name": "Track supplier price changes from Gmail CSV to Google Sheets and Slack",
+  "nodes": [
+    {
+      "id": "cdfed9c9-7a7b-45ff-a47c-3d7ba2cfb827",
+      "name": "New email with price list",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour",
+              "minute": 0
+            }
+          ]
+        },
+        "event": "messageReceived",
+        "simple": false,
+        "maxResults": 5,
+        "filters": {
+          "q": "has:attachment filename:csv",
+          "readStatus": "unread"
+        },
+        "options": {
+          "downloadAttachments": true,
+          "dataPropertyAttachmentsPrefixName": "attachment_"
+        }
+      }
+    },
+    {
+      "id": "c8bab992-aeb5-430c-aea4-6a0083fc00f8",
+      "name": "Read CSV attachment",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        200
+      ],
+      "parameters": {
+        "operation": "csv",
+        "binaryPropertyName": "attachment_0",
+        "options": {
+          "headerRow": true,
+          "delimiter": ","
+        }
+      }
+    },
+    {
+      "id": "4fd04abc-f132-4587-b97d-76b36277ee72",
+      "name": "Set import settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1b9c001-0001-4000-8000-000000000001",
+              "name": "skuColumn",
+              "value": "SKU",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c001-0002-4000-8000-000000000002",
+              "name": "nameColumn",
+              "value": "Name",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c001-0003-4000-8000-000000000003",
+              "name": "priceColumn",
+              "value": "Price",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c001-0004-4000-8000-000000000004",
+              "name": "minChangePercent",
+              "value": 0,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "83e7956e-ce42-44ab-a65e-6c9a1e188ffc",
+      "name": "Normalize CSV rows",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        200
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1b9c002-0001-4000-8000-000000000001",
+              "name": "sku",
+              "value": "={{ String($json[$json.skuColumn] ?? \"\").trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c002-0002-4000-8000-000000000002",
+              "name": "name",
+              "value": "={{ String($json[$json.nameColumn] ?? \"\").trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c002-0003-4000-8000-000000000003",
+              "name": "newPrice",
+              "value": "={{ Number(String($json[$json.priceColumn] ?? \"\").replace(/\\s/g, \"\").replace(\",\", \".\")) }}",
+              "type": "number"
+            },
+            {
+              "id": "d1b9c002-0004-4000-8000-000000000004",
+              "name": "minChangePercent",
+              "value": "={{ $json.minChangePercent }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {
+          "ignoreConversionErrors": true
+        }
+      }
+    },
+    {
+      "id": "a439ba24-b2ee-4640-a2f2-09fae84f63c4",
+      "name": "Keep rows with SKU and price",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1200,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "d1b9c003-0001-4000-8000-000000000001",
+              "leftValue": "={{ $json.sku !== \"\" && Number.isFinite($json.newPrice) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4b88126b-0fc1-455b-a0a5-29c7ed671b72",
+      "name": "Attach previous prices",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1440,
+        300
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByFields",
+        "fieldsToMatchString": "sku",
+        "joinMode": "enrichInput1",
+        "options": {}
+      }
+    },
+    {
+      "id": "7e284a03-865f-4ee1-b89c-f529fc8222c6",
+      "name": "Mark email as read",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        40
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "markAsRead",
+        "messageId": "={{ $(\"New email with price list\").first().json.id }}"
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "afac8185-22eb-41d7-b52f-b9d087a78b34",
+      "name": "Read current prices from Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        420
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Supplier prices"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Prices"
+        },
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "general": "FORMATTED_VALUE",
+              "date": "FORMATTED_STRING"
+            }
+          }
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "06522dbd-3df4-4b79-9b13-51bcdc855fb2",
+      "name": "Parse previous price",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1680,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1b9c004-0001-4000-8000-000000000001",
+              "name": "sku",
+              "value": "={{ $json.sku }}",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c004-0002-4000-8000-000000000002",
+              "name": "name",
+              "value": "={{ $json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c004-0003-4000-8000-000000000003",
+              "name": "newPrice",
+              "value": "={{ $json.newPrice }}",
+              "type": "number"
+            },
+            {
+              "id": "d1b9c004-0004-4000-8000-000000000004",
+              "name": "oldPrice",
+              "value": "={{ $json.price !== undefined && $json.price !== \"\" ? Number(String($json.price).replace(/\\s/g, \"\").replace(\",\", \".\")) : null }}",
+              "type": "number"
+            },
+            {
+              "id": "d1b9c004-0005-4000-8000-000000000005",
+              "name": "minChangePercent",
+              "value": "={{ $json.minChangePercent }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {
+          "ignoreConversionErrors": true
+        }
+      }
+    },
+    {
+      "id": "31212917-6373-4ab8-a62d-e058f536df6f",
+      "name": "Calculate price change",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1b9c005-0001-4000-8000-000000000001",
+              "name": "status",
+              "value": "={{ $json.oldPrice === null ? \"new\" : $json.newPrice > $json.oldPrice ? \"increase\" : $json.newPrice < $json.oldPrice ? \"decrease\" : \"same\" }}",
+              "type": "string"
+            },
+            {
+              "id": "d1b9c005-0002-4000-8000-000000000002",
+              "name": "changePercent",
+              "value": "={{ $json.oldPrice ? Math.round(($json.newPrice - $json.oldPrice) / $json.oldPrice * 1000) / 10 : 0 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "86ccf289-b416-49cc-9d86-9d28ed5dd6bb",
+      "name": "Keep changed prices",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        2160,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "d1b9c006-0001-4000-8000-000000000001",
+              "leftValue": "={{ $json.status !== \"same\" && ($json.status === \"new\" || Math.abs($json.changePercent) >= $json.minChangePercent) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ce47604c-0ef8-4a04-b733-3c3cc8d1d600",
+      "name": "Update prices in Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2400,
+        220
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Supplier prices"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Prices"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sku": "={{ $json.sku }}",
+            "name": "={{ $json.name }}",
+            "price": "={{ $json.newPrice }}",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [
+            "sku"
+          ],
+          "schema": [
+            {
+              "id": "sku",
+              "displayName": "sku",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "price",
+              "displayName": "price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "59b6b4c8-95d1-429e-839f-580d08f9c75a",
+      "name": "Build Slack message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2400,
+        400
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1b9c007-0001-4000-8000-000000000001",
+              "name": "message",
+              "value": "={{ \"Supplier price list: \" + $input.all().length + \" price change(s)\\n\\n\" + $input.all().map(i => i.json).slice(0, 40).map(i => i.status === \"new\" ? \"• \" + i.sku + \" \" + i.name + \": new item, \" + i.newPrice : \"• \" + i.sku + \" \" + i.name + \": \" + i.oldPrice + \" → \" + i.newPrice + \" (\" + (i.changePercent > 0 ? \"+\" : \"\") + i.changePercent + \"%)\").join(\"\\n\") }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "cd5f0ff4-19ed-4fb0-9309-d3fed47a47f8",
+      "name": "Post price changes to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        2640,
+        400
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "price-changes"
+        },
+        "messageType": "text",
+        "text": "={{ $json.message }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "ba2fd3fb-b8c1-421c-8584-49d313ddf8b9",
+      "name": "Overview note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        20
+      ],
+      "parameters": {
+        "content": "## Track supplier price changes from Gmail CSV to Google Sheets and Slack\n\nWhen a supplier emails a CSV price list, the workflow compares it with the prices stored in a Google Sheet, updates the sheet and posts every price change to Slack.\n\n### How it works\n1. Gmail Trigger checks hourly for unread emails with a CSV attachment.\n2. The CSV is read and each row is normalized: SKU, name and a numeric price (spaces and decimal commas are handled).\n3. Current prices are read from a Google Sheet and matched to the new rows by SKU.\n4. Each row becomes new, increase, decrease or same. Rows with no change are dropped.\n5. Changed rows are written back to the sheet and listed in one Slack message.\n\n### Setup\n1. Connect Gmail, Google Sheets and Slack.\n2. Create a sheet with the header row sku, name, price, updated_at. Select it in both Google Sheets nodes.\n3. In Gmail Trigger, add the supplier address to the Sender filter.\n4. In Set import settings, enter the CSV column names and the minimum change in percent.\n5. Choose the Slack channel and activate the workflow.\n\n### Customization\n- Set a minimum change percent to ignore small moves.\n- Replace Slack with email or Telegram.\n- Change the CSV delimiter in Read CSV attachment.",
+        "color": 1,
+        "width": 520,
+        "height": 960
+      }
+    },
+    {
+      "id": "6b782153-aa4a-4ee6-8211-d7bc2340c5bb",
+      "name": "Section note: intake",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "content": "## 1. Intake\nUnread supplier emails with a CSV attachment. The email is marked as read.",
+        "color": 7,
+        "width": 700,
+        "height": 380
+      }
+    },
+    {
+      "id": "f84df955-285d-4587-b5ed-b4412c4d3a09",
+      "name": "Section note: normalize",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        660,
+        140
+      ],
+      "parameters": {
+        "content": "## 2. Clean up rows\nSettings name the CSV columns. Rows are normalized and invalid ones are dropped.",
+        "color": 7,
+        "width": 760,
+        "height": 240
+      }
+    },
+    {
+      "id": "f69a5e0b-793a-4f40-9a66-fb87bffab1e2",
+      "name": "Section note: compare",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        680,
+        400
+      ],
+      "parameters": {
+        "content": "## 3. Compare with the sheet\nStored prices are joined by SKU. Each row gets a status and a percent change.",
+        "color": 7,
+        "width": 980,
+        "height": 420
+      }
+    },
+    {
+      "id": "98803c5e-a2a0-468e-8703-7f7b648cc574",
+      "name": "Section note: report",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2340,
+        180
+      ],
+      "parameters": {
+        "content": "## 4. Save and report\nChanged prices go to the sheet and into one Slack message.",
+        "color": 7,
+        "width": 540,
+        "height": 400
+      }
+    }
+  ],
+  "connections": {
+    "New email with price list": {
+      "main": [
+        [
+          {
+            "node": "Read CSV attachment",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read current prices from Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read CSV attachment": {
+      "main": [
+        [
+          {
+            "node": "Set import settings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mark email as read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set import settings": {
+      "main": [
+        [
+          {
+            "node": "Normalize CSV rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize CSV rows": {
+      "main": [
+        [
+          {
+            "node": "Keep rows with SKU and price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep rows with SKU and price": {
+      "main": [
+        [
+          {
+            "node": "Attach previous prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach previous prices": {
+      "main": [
+        [
+          {
+            "node": "Parse previous price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read current prices from Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Attach previous prices",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Parse previous price": {
+      "main": [
+        [
+          {
+            "node": "Calculate price change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate price change": {
+      "main": [
+        [
+          {
+            "node": "Keep changed prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep changed prices": {
+      "main": [
+        [
+          {
+            "node": "Update prices in Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack message": {
+      "main": [
+        [
+          {
+            "node": "Post price changes to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
